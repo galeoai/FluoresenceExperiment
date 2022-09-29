@@ -2,6 +2,8 @@ import os, sys, cv2, shutil
 import matplotlib.pyplot as plt
 import numpy as np
 
+from CumulativeData import CumulativeData
+from References import References
 from Sample import Sample
 
 
@@ -12,10 +14,6 @@ def split_into_samples():
     for i in range(len(filenames) // 6):
         samps.append(Sample(filenames[i * 6:(i + 1) * 6]))
     return samps
-
-
-def sample_name(sample: Sample) -> str:
-    return sample.ET545_unlit_name[5:sample.ET545_unlit_name.index("_W.O")]
 
 
 def convert_to_grayscale(input_image):
@@ -36,12 +34,13 @@ def write_single_histo_chart(img: np.ndarray, save_path: str):
         ax.set_title(titles[idx])
         ax.set_xlabel(xaxes[idx])
         ax.set_ylabel(yaxes)
-    plt.tight_layout()
-    plt.savefig(save_path)
+    f.tight_layout()
+    f.savefig(save_path)
+    plt.close(f)
 
 
 def histo_name(original_name: str) -> str:
-    return original_name[5:-3]+"png"
+    return original_name[5:-4]+"_histogram"+".png"
 
 
 def write_histos(sample: Sample, base_dir: str):
@@ -52,36 +51,63 @@ def write_histos(sample: Sample, base_dir: str):
 
 
 def write_minus_images(sample: Sample, base_dir: str):
-    minus_470 = np.clip(sample.ET470_lit - sample.ET470_unlit, 0, 255)
-    minus_470_path = os.path.join(base_dir, sample_name(sample)+"_470_subtracted_histo.png")
-    write_single_histo_chart(minus_470, minus_470_path)
-    cv2.imwrite(os.path.join(base_dir, sample_name(sample)+"_470_subtracted.png"), minus_470)
-    minus_505 = np.clip(sample.ET505_lit - sample.ET505_unlit, 0, 255)
-    minus_505_path = os.path.join(base_dir, sample_name(sample)+"_505_subtracted.png")
-    write_single_histo_chart(minus_505, minus_505_path)
-    cv2.imwrite(os.path.join(base_dir, sample_name(sample) + "_505_subtracted.png"), minus_505)
-    minus_545 = np.clip(sample.ET545_lit - sample.ET545_unlit, 0, 255)
-    minus_545_path = os.path.join(base_dir, sample_name(sample)+"_545_subtracted.png")
-    write_single_histo_chart(minus_545, minus_545_path)
-    cv2.imwrite(os.path.join(base_dir, sample_name(sample) + "_545_subtracted.png"), minus_545)
+    filter_sizes = ["470", "505", "545"]
+    sample_imgs_lit = [sample.ET470_lit, sample.ET505_lit, sample.ET545_lit]
+    sample_imgs_unlit = [sample.ET470_unlit, sample.ET505_unlit, sample.ET545_unlit]
+    for i in range(3):
+        minus_img = np.clip(sample_imgs_lit[i] - sample_imgs_unlit[i], 0, 255)
+        minus_img_histo_path = os.path.join(base_dir, sample.name + f"_{filter_sizes[i]}_subtracted_histo.png")
+        write_single_histo_chart(minus_img, minus_img_histo_path)
+        cv2.imwrite(os.path.join(base_dir, sample.name + f"_{filter_sizes[i]}_subtracted.png"), minus_img)
 
 
-def analyze_sample(sample: Sample):
+def write_minus_reference_images(sample: Sample, references: References, base_dir: str):
+    filter_sizes = ["470", "505", "545"]
+    sample_imgs = [sample.ET470_lit, sample.ET505_lit, sample.ET545_lit]
+    for reference in [references.reference_one, references.reference_two]:
+        reference_imgs = [reference.ET470_lit, reference.ET505_lit, reference.ET545_lit]
+        for i in range(3):
+            minus_img = np.clip(sample_imgs[i] - reference_imgs[i], 0, 255)
+            minus_img_histo_path = os.path.join(base_dir, sample.name + f"_{reference.name}_{filter_sizes[i]}_subtracted_histo.png")
+            write_single_histo_chart(minus_img, minus_img_histo_path)
+            cv2.imwrite(os.path.join(base_dir, sample.name + f"_{reference.name}_{filter_sizes[i]}_subtracted.png"), minus_img)
+
+
+def write_scatter_plot(sample: Sample, references: References, base_dir: str):
+    fig, ax = plt.subplots()
+    x = sample.brightest_pixels.all_bw_brightest()+references.yeast_reference.brightest_pixels.all_bw_brightest()
+    y = sample.brightest_pixels.all_green_brightest()+references.yeast_reference.brightest_pixels.all_green_brightest()
+    labels = [sample.name + " " + bright_name for bright_name in sample.brightest_pixels.all_brightest_names()]\
+             + ["yeast " + name for name in references.yeast_reference.brightest_pixels.all_brightest_names()]
+    ax.scatter(x, y)
+    for i, txt in enumerate(labels):
+        ax.annotate(txt, (x[i], y[i]))
+    plt.savefig(os.path.join(base_dir, "scatter.png"))
+
+
+def analyze_sample(sample: Sample, references: References, cumulative_data: CumulativeData):
     sample.load() # loads image files into memory
-    base_dir = f"results/{sample_name(sample)}"
+    base_dir = f"results/{sample.name}"
     if not os.path.exists(base_dir):
         os.mkdir(base_dir)
     [shutil.copyfile(os.path.join("data", img_name), os.path.join(base_dir, img_name)) for img_name in sample.all_filenames()] # copies files
     write_histos(sample, base_dir) # writes histos
     write_minus_images(sample, base_dir)
-    sample.unload() # frees memory
+    write_minus_reference_images(sample, references, base_dir)
+    write_scatter_plot(sample, references, base_dir)
+    cumulative_data.add_sample(sample.brightest_pixels)
+    sample.unload()  # frees memory
 
 
 def main():
     samples = split_into_samples()
-    for sample in samples:
-        analyze_sample(sample)
-        sys.exit(0)
+    references = References()
+    cumulative_data = CumulativeData()
+    for i in range(3):#len(samples)):
+        sample = samples[i]
+        analyze_sample(sample, references, cumulative_data)
+        print(f"Finished Sample {sample.name}")
+    cumulative_data.write_csv("results")
 
 
 if __name__ == '__main__':
