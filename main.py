@@ -83,6 +83,7 @@ def write_scatter_plot(sample: Sample, references: References, base_dir: str):
     for i, txt in enumerate(labels):
         ax.annotate(txt, (x[i], y[i]))
     plt.savefig(os.path.join(base_dir, "scatter.png"))
+    plt.close(fig)
 
 
 def analyze_sample(sample: Sample, references: References, cumulative_data: CumulativeData):
@@ -103,7 +104,7 @@ def main():
     samples = split_into_samples()
     references = References()
     cumulative_data = CumulativeData()
-    for i in range(3):#len(samples)):
+    for i in range(len(samples)):
         sample = samples[i]
         analyze_sample(sample, references, cumulative_data)
         print(f"Finished Sample {sample.name}")
